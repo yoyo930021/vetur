@@ -151,6 +151,14 @@ export class VLS {
     this.lspConnection.onColorPresentation(this.onColorPresentations.bind(this));
 
     this.lspConnection.onRequest('requestCodeActionEdits', this.getRefactorEdits.bind(this));
+
+    this.lspConnection.onRequest('$/getDiagnostics', params => {
+      const doc = this.documentService.getDocument(params.uri);
+      if (doc) {
+        return this.doValidate(doc);
+      }
+      return [];
+    });
   }
 
   private setupCustomLSPHandlers() {
