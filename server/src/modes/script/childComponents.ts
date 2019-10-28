@@ -3,7 +3,7 @@ import {
   getLastChild,
   buildDocumentation,
   getNodeFromExportNode,
-  getClassDecoratorArgumentType,
+  getComponentDecoratorArgumentType,
   isClassType
 } from './componentInfo';
 import { T_TypeScript } from '../../services/dependencyService';
@@ -28,7 +28,7 @@ export function getChildComponents(
   let type = defaultExportType;
   if (isClassType(tsModule, type)) {
     // get decorator argument type when class
-    const classDecoratorArgumentType = getClassDecoratorArgumentType(tsModule, defaultExportType, checker);
+    const classDecoratorArgumentType = getComponentDecoratorArgumentType(tsModule, defaultExportType, checker);
     if (!classDecoratorArgumentType) {
       return undefined;
     }
@@ -73,9 +73,7 @@ export function getChildComponents(
 
       if (objectLiteralSymbol.flags & tsModule.SymbolFlags.Alias) {
         const definitionSymbol = checker.getAliasedSymbol(objectLiteralSymbol);
-        if (tsModule.isClassDeclaration(
-          definitionSymbol.valueDeclaration
-        )) {
+        if (tsModule.isClassDeclaration(definitionSymbol.valueDeclaration)) {
           const defaultExportNode = definitionSymbol.valueDeclaration;
           result.push({
             name: componentName,

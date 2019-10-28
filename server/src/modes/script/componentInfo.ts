@@ -104,7 +104,7 @@ function getProps(tsModule: T_TypeScript, defaultExportType: ts.Type, checker: t
     const propsSymbols = type
       .getProperties()
       .filter(property =>
-        getPropertyDecoratorNames(property, tsModule.SyntaxKind.PropertyDeclaration).some(decoratorName =>
+        getPropertyDecoratorNames(tsModule, property, tsModule.SyntaxKind.PropertyDeclaration).some(decoratorName =>
           propDecoratorNames.includes(decoratorName)
         )
       );
@@ -194,7 +194,7 @@ function getData(tsModule: T_TypeScript, defaultExportType: ts.Type, checker: ts
       .getProperties()
       .filter(
         property =>
-          !getPropertyDecoratorNames(property, tsModule.SyntaxKind.PropertyDeclaration).some(decoratorName =>
+          !getPropertyDecoratorNames(tsModule, property, tsModule.SyntaxKind.PropertyDeclaration).some(decoratorName =>
             noDataDecoratorNames.includes(decoratorName)
           ) &&
           !property.name.startsWith('_') &&
@@ -334,7 +334,7 @@ function getMethods(
       .getProperties()
       .filter(
         property =>
-          !getPropertyDecoratorNames(property, tsModule.SyntaxKind.MethodDeclaration).some(
+          !getPropertyDecoratorNames(tsModule, property, tsModule.SyntaxKind.MethodDeclaration).some(
             decoratorName => decoratorName === 'Watch'
           ) && !isInternalHook(property.name)
       );
@@ -408,13 +408,24 @@ export function isClassType(tsModule: T_TypeScript, type: ts.Type) {
   }
 }
 
-export function getClassDecoratorArgumentType(tsModule: T_TypeScript, type: ts.Type, checker: ts.TypeChecker) {
+export function getComponentDecoratorArgumentType(tsModule: T_TypeScript, type: ts.Type, checker: ts.TypeChecker) {
   const decorators = type.symbol.declarations[0].decorators;
   if (!decorators || decorators.length === 0) {
     return undefined;
   }
 
-  const decoratorArguments = (decorators[0].expression as ts.CallExpression).arguments;
+  const componentDecorator = decorators.find(el => {
+    const decoratorName = tsModule.isCallExpression(el.expression)
+      ? el.expression.expression.getText()
+      : el.expression.getText();
+    return decoratorName === 'Component';
+  });
+
+  if (!componentDecorator || !tsModule.isCallExpression(componentDecorator.expression)) {
+    return undefined;
+  }
+
+  const decoratorArguments = componentDecorator.expression.arguments;
   if (!decoratorArguments || decoratorArguments.length === 0) {
     return undefined;
   }
@@ -432,7 +443,7 @@ function getClassAndObjectInfo<C, O>(
   const result: Array<C | O> = [];
   if (isClassType(tsModule, defaultExportType)) {
     result.push.apply(result, getClassResult(defaultExportType) || []);
-    const decoratorArgumentType = getClassDecoratorArgumentType(tsModule, defaultExportType, checker);
+    const decoratorArgumentType = getComponentDecoratorArgumentType(tsModule, defaultExportType, checker);
     if (decoratorArgumentType) {
       result.push.apply(result, getObjectResult(decoratorArgumentType) || []);
     }
@@ -442,7 +453,11 @@ function getClassAndObjectInfo<C, O>(
   return result;
 }
 
-function getPropertyDecoratorNames(property: ts.Symbol, checkSyntaxKind: ts.SyntaxKind): string[] {
+function getPropertyDecoratorNames(
+  tsModule: T_TypeScript,
+  property: ts.Symbol,
+  checkSyntaxKind: ts.SyntaxKind
+): string[] {
   if (property.valueDeclaration.kind !== checkSyntaxKind) {
     return [];
   }
@@ -456,10 +471,13 @@ function getPropertyDecoratorNames(property: ts.Symbol, checkSyntaxKind: ts.Synt
     return [];
   }
 
-  return decorators
-    .map(decorator => decorator.expression as ts.CallExpression)
-    .filter(decoratorExpression => decoratorExpression.expression !== undefined)
-    .map(decoratorExpression => decoratorExpression.expression.getText());
+  return decorators.map(decorator => {
+    if (tsModule.isCallExpression(decorator.expression)) {
+      return decorator.expression.expression.getText();
+    } else {
+      return decorator.expression.getText();
+    }
+  });
 }
 
 export function buildDocumentation(tsModule: T_TypeScript, s: ts.Symbol, checker: ts.TypeChecker) {
