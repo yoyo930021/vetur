@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import * as assert from 'assert';
-import { activateLS, sleep, showFile, FILE_LOAD_SLEEP_TIME } from '../helper';
+import { activateLS, showFile } from '../helper';
 import { getDocUri, sameLineRange } from '../util';
+import { getDiagnosticsAndTimeout } from '../helper';
 
 describe('Should do codeAction', () => {
   const docUri = getDocUri('client/codeAction/Basic.vue');
@@ -9,11 +10,6 @@ describe('Should do codeAction', () => {
   before('activate', async () => {
     await activateLS();
     await showFile(docUri);
-    await sleep(FILE_LOAD_SLEEP_TIME);
-
-    // More sleep for waiting diagnostics
-    await sleep(FILE_LOAD_SLEEP_TIME);
-    await sleep(FILE_LOAD_SLEEP_TIME);
   });
 
   it('finds codeAction for unused import', async () => {
@@ -34,8 +30,7 @@ interface CodeAction {
 }
 
 async function testCodeAction(docUri: vscode.Uri, range: vscode.Range, expectedActions: CodeAction[]) {
-  // For diagnostics to show up
-  await sleep(2000);
+  await getDiagnosticsAndTimeout(docUri);
 
   const result = (await vscode.commands.executeCommand(
     'vscode.executeCodeActionProvider',

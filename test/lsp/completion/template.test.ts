@@ -1,4 +1,4 @@
-import { activateLS, showFile, sleep, FILE_LOAD_SLEEP_TIME } from '../helper';
+import { activateLS, showFile } from '../helper';
 import { position, getDocUri } from '../util';
 import { testCompletion } from './helper';
 
@@ -12,7 +12,6 @@ describe('Should autocomplete for <template>', () => {
     await activateLS();
     await showFile(templateDocUri);
     await showFile(templateFrameworkDocUri);
-    await sleep(FILE_LOAD_SLEEP_TIME);
   });
 
   describe('Should complete <template> section', () => {
