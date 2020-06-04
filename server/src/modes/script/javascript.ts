@@ -23,7 +23,10 @@ import {
   FormattingOptions,
   DiagnosticTag,
   MarkupContent,
-  InsertTextFormat
+  InsertTextFormat,
+  CodeAction,
+  CodeActionKind,
+  CodeActionContext
 } from 'vscode-languageserver-types';
 import { LanguageMode } from '../../embeddedSupport/languageModes';
 import { VueDocumentRegions, LanguageRange } from '../../embeddedSupport/embeddedSupport';
@@ -39,7 +42,7 @@ import { VLSFormatConfig } from '../../config';
 import { VueInfoService } from '../../services/vueInfoService';
 import { getComponentInfo } from './componentInfo';
 import { DependencyService, T_TypeScript, State } from '../../services/dependencyService';
-import { RefactorAction } from '../../types';
+import { RefactorAction, CodeActionReq, CodeActionReqKind } from '../../types';
 import { IServiceHost } from '../../services/typescriptService/serviceHost';
 import { toCompletionItemKind, toSymbolKind } from '../../services/typescriptService/util';
 
@@ -111,7 +114,8 @@ export async function getJavascriptMode(
       const fileFsPath = getFileFsPath(doc.uri);
       const rawScriptDiagnostics = [
         ...service.getSyntacticDiagnostics(fileFsPath),
-        ...service.getSemanticDiagnostics(fileFsPath)
+        ...service.getSemanticDiagnostics(fileFsPath),
+        ...service.getSuggestionDiagnostics(fileFsPath)
       ];
 
       return rawScriptDiagnostics.map(diag => {
@@ -433,6 +437,7 @@ export async function getJavascriptMode(
       const fileName = getFileFsPath(scriptDoc.uri);
       const start = scriptDoc.offsetAt(range.start);
       const end = scriptDoc.offsetAt(range.end);
+      const textRange = { pos: start, end };
       if (!supportedCodeFixCodes) {
         supportedCodeFixCodes = new Set(
           ts
@@ -441,46 +446,71 @@ export async function getJavascriptMode(
             .filter(x => !isNaN(x))
         );
       }
-      const fixableDiagnosticCodes = context.diagnostics.map(d => +d.code!).filter(c => supportedCodeFixCodes.has(c));
-      if (!fixableDiagnosticCodes) {
-        return [];
-      }
 
       const formatSettings: ts.FormatCodeSettings = getFormatCodeSettings(config);
 
-      const result: Command[] = [];
-      const fixes = service.getCodeFixesAtPosition(
-        fileName,
-        start,
-        end,
-        fixableDiagnosticCodes,
-        formatSettings,
-        /*preferences*/ {}
-      );
-      collectQuickFixCommands(fixes, service, result);
+      const result: CodeAction[] = [];
 
-      const textRange = { pos: start, end };
-      const refactorings = service.getApplicableRefactors(fileName, textRange, /*preferences*/ {});
-      collectRefactoringCommands(refactorings, fileName, formatSettings, textRange, result);
+      provideQuickFixCodeActions(
+        fileName,
+        textRange,
+        context,
+        supportedCodeFixCodes,
+        formatSettings,
+        /*preferences*/ {},
+        service,
+        result
+      );
+      provideOrganizeImports(fileName, textRange, context, formatSettings, /*preferences*/ {}, service, result);
+      provideRefactoringCommands(fileName, textRange, context, formatSettings, /*preferences*/ {}, service, result);
 
       return result;
     },
-    getRefactorEdits(doc: TextDocument, args: RefactorAction) {
+    getCodeActionEdits(doc: TextDocument, req: CodeActionReq) {
       const { service } = updateCurrentVueTextDocument(doc);
-      const response = service.getEditsForRefactor(
-        args.fileName,
-        args.formatOptions,
-        args.textRange,
-        args.refactorName,
-        args.actionName,
-        args.preferences
-      );
-      if (!response) {
-        // TODO: What happens when there's no response?
-        return createApplyCodeActionCommand('', {});
+
+      if (req.kind === CodeActionReqKind.RefactorAction) {
+        const args = req.arguments;
+        const response = service.getEditsForRefactor(
+          req.fileName,
+          req.formatSettings,
+          req.textRange,
+          args.refactorName,
+          args.actionName,
+          req.preferences
+        );
+        if (!response) {
+          // TODO: What happens when there's no response?
+          return createApplyCodeActionCommand('', {});
+        }
+        const uriMapping = createUriMappingForEdits(response.edits, service);
+        return createApplyCodeActionCommand('', uriMapping);
       }
-      const uriMapping = createUriMappingForEdits(response.edits, service);
-      return createApplyCodeActionCommand('', uriMapping);
+
+      if (req.kind === CodeActionReqKind.CombinedCodeFix) {
+        const fix = service.getCombinedCodeFix(
+          { type: 'file', fileName: req.fileName },
+          req.arguments.fixId,
+          req.formatSettings,
+          req.preferences
+        );
+
+        const uriMapping = createUriMappingForEdits(fix.changes.slice(), service);
+        return createApplyCodeActionCommand('', uriMapping);
+      }
+
+      if (req.kind === CodeActionReqKind.OrganizeImports) {
+        const response = service.organizeImports(
+          { type: 'file', fileName: req.fileName },
+          req.formatSettings,
+          req.preferences
+        );
+
+        const uriMapping = createUriMappingForEdits(response.slice(), service);
+        return createApplyCodeActionCommand('', uriMapping);
+      }
+
+      return createApplyCodeActionCommand('', {});
     },
     format(doc: TextDocument, range: Range, formatParams: FormattingOptions): TextEdit[] {
       const { scriptDoc, service } = updateCurrentVueTextDocument(doc);
@@ -559,58 +589,168 @@ export async function getJavascriptMode(
   };
 }
 
-function collectRefactoringCommands(
-  refactorings: ts.ApplicableRefactorInfo[],
+function provideRefactoringCommands(
   fileName: string,
-  formatSettings: any,
   textRange: { pos: number; end: number },
-  result: Command[]
+  context: CodeActionContext,
+  formatSettings: ts.FormatCodeSettings,
+  preferences: ts.UserPreferences,
+  service: ts.LanguageService,
+  result: CodeAction[]
 ) {
-  const actions: RefactorAction[] = [];
+  if (
+    context.only &&
+    !context.only.some(el =>
+      [
+        CodeActionKind.Refactor,
+        CodeActionKind.RefactorExtract,
+        CodeActionKind.RefactorInline,
+        CodeActionKind.RefactorRewrite,
+        CodeActionKind.Source
+      ].includes(el)
+    )
+  ) {
+    return;
+  }
+
+  const refactorings = service.getApplicableRefactors(fileName, textRange, /*preferences*/ {});
+
+  const actions: CodeActionReq[] = [];
   for (const refactoring of refactorings) {
     const refactorName = refactoring.name;
     if (refactoring.inlineable) {
       actions.push({
+        kind: CodeActionReqKind.RefactorAction,
         fileName,
-        formatOptions: formatSettings,
         textRange,
-        refactorName,
-        actionName: refactorName,
-        preferences: {},
-        description: refactoring.description
+        formatSettings,
+        preferences,
+        arguments: {
+          refactorName,
+          actionName: refactorName,
+          description: refactoring.description
+        }
       });
     } else {
       actions.push(
-        ...refactoring.actions.map(action => ({
-          fileName,
-          formatOptions: formatSettings,
-          textRange,
-          refactorName,
-          actionName: action.name,
-          preferences: {},
-          description: action.description
-        }))
+        ...refactoring.actions.map(
+          action =>
+            ({
+              kind: CodeActionReqKind.RefactorAction,
+              fileName,
+              textRange,
+              formatSettings,
+              preferences,
+              arguments: {
+                refactorName,
+                actionName: action.name,
+                description: action.description
+              }
+            } as CodeActionReq)
+        )
       );
     }
   }
   for (const action of actions) {
     result.push({
-      command: 'vetur.chooseTypeScriptRefactoring',
-      title: action.description,
-      arguments: [action]
+      title: (action.arguments as RefactorAction).description,
+      kind: CodeActionKind.Refactor,
+      command: createRequestCodeActionCommand((action.arguments as RefactorAction).description, action)
     });
   }
 }
 
-function collectQuickFixCommands(
-  fixes: ReadonlyArray<ts.CodeFixAction>,
+function provideQuickFixCodeActions(
+  fileName: string,
+  textRange: { pos: number; end: number },
+  context: CodeActionContext,
+  supportedCodeFixCodes: Set<number>,
+  formatSettings: ts.FormatCodeSettings,
+  preferences: ts.UserPreferences,
   service: ts.LanguageService,
-  result: Command[]
+  result: CodeAction[]
 ) {
-  for (const fix of fixes) {
-    const uriTextEditMapping = createUriMappingForEdits(fix.changes, service);
-    result.push(createApplyCodeActionCommand(fix.description, uriTextEditMapping));
+  if (context.only && !context.only.includes(CodeActionKind.QuickFix)) {
+    return;
   }
+
+  const fixableDiagnosticCodes = context.diagnostics.map(d => +d.code!).filter(c => supportedCodeFixCodes.has(c));
+  if (!fixableDiagnosticCodes) {
+    return;
+  }
+
+  const fixes = service.getCodeFixesAtPosition(
+    fileName,
+    textRange.pos,
+    textRange.end,
+    fixableDiagnosticCodes,
+    formatSettings,
+    preferences
+  );
+
+  for (const fix of fixes) {
+    result.push({
+      title: fix.description,
+      kind: CodeActionKind.QuickFix,
+      diagnostics: context.diagnostics,
+      command: createApplyCodeActionCommand(fix.description, createUriMappingForEdits(fix.changes, service))
+    });
+    if (fix.fixAllDescription && fix.fixId) {
+      result.push({
+        title: fix.fixAllDescription,
+        kind: CodeActionKind.QuickFix,
+        diagnostics: context.diagnostics,
+        command: createRequestCodeActionCommand(fix.fixAllDescription, {
+          kind: CodeActionReqKind.CombinedCodeFix,
+          fileName,
+          textRange,
+          formatSettings,
+          preferences,
+          arguments: {
+            fixId: fix.fixId
+          }
+        })
+      });
+    }
+  }
+}
+
+function provideOrganizeImports(
+  fileName: string,
+  textRange: { pos: number; end: number },
+  context: CodeActionContext,
+  formatSettings: ts.FormatCodeSettings,
+  preferences: ts.UserPreferences,
+  service: ts.LanguageService,
+  result: CodeAction[]
+) {
+  if (
+    !context.only ||
+    (!context.only.includes(CodeActionKind.SourceOrganizeImports) && !context.only.includes(CodeActionKind.Source))
+  ) {
+    return;
+  }
+
+  result.push({
+    title: 'Organize Imports',
+    kind: CodeActionKind.SourceOrganizeImports,
+    command: createRequestCodeActionCommand('Organize Imports', {
+      kind: CodeActionReqKind.OrganizeImports,
+      fileName,
+      textRange,
+      formatSettings,
+      preferences,
+      arguments: {}
+    })
+  });
+}
+
+function createRequestCodeActionCommand(title: string, action: CodeActionReq): Command {
+  return {
+    title,
+    command: 'vetur.chooseTypeScriptCodeAction',
+    arguments: [action]
+  };
 }
 
 function createApplyCodeActionCommand(title: string, uriTextEditMapping: Record<string, TextEdit[]>): Command {
@@ -678,7 +818,8 @@ function getFormatCodeSettings(config: any): ts.FormatCodeSettings {
   return {
     tabSize: config.vetur.format.options.tabSize,
     indentSize: config.vetur.format.options.tabSize,
-    convertTabsToSpaces: !config.vetur.format.options.useTabs
+    convertTabsToSpaces: !config.vetur.format.options.useTabs,
+    insertSpaceAfterCommaDelimiter: true
   };
 }
 

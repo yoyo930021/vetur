@@ -17,6 +17,11 @@ describe('Should do codeAction', () => {
     await testCodeAction(docUri, sameLineRange(5, 6, 6), codeActions);
   });
 
+  it('finds fixAll codeAction for unused import', async () => {
+    const codeActions = [{ title: `Delete all unused declarations`, command: 'vetur.chooseTypeScriptCodeAction' }];
+    await testCodeAction(docUri, sameLineRange(5, 6, 6), codeActions);
+  });
+
   it('finds codeAction for unused variables', async () => {
     const codeActions = [{ title: `Remove unused declaration for: 'foo'`, command: 'vetur.applyWorkspaceEdits' }];
 
@@ -32,16 +37,15 @@ interface CodeAction {
 async function testCodeAction(docUri: vscode.Uri, range: vscode.Range, expectedActions: CodeAction[]) {
   await getDiagnosticsAndTimeout(docUri);
 
-  const result = (await vscode.commands.executeCommand(
-    'vscode.executeCodeActionProvider',
-    docUri,
-    range
-  )) as CodeAction[];
+  const result = (await vscode.commands.executeCommand('vscode.executeCodeActionProvider', docUri, range)) as {
+    title: string;
+    command: { command: string };
+  }[];
 
   expectedActions.forEach(eAction => {
     assert.ok(
       result.some(rAction => {
-        return rAction.title === eAction.title && rAction.command === eAction.command;
+        return rAction.title === eAction.title && rAction.command.command === eAction.command;
       }),
       `Cannot find matching codeAction with title '${eAction.title}'\n` +
         `Seen codeActions are:\n${JSON.stringify(result, null, 2)}`
