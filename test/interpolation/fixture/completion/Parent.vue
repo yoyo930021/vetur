@@ -1,6 +1,6 @@
 <template>
   <div>
-    <basic :></basic>
+    <basic :f></basic>
     <basic v-if="" @click="" :foo=""></basic>
     <
   </div>

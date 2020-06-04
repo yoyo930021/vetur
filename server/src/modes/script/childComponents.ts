@@ -1,5 +1,12 @@
 import * as ts from 'typescript';
-import { getLastChild, buildDocumentation, getDefaultExportObjectLiteralExpr } from './componentInfo';
+import {
+  getLastChild,
+  buildDocumentation,
+  getNodeFromExportNode,
+  getComponentDecoratorArgumentType,
+  getDefaultExportNode,
+  isClassType
+} from './componentInfo';
 import { T_TypeScript } from '../../services/dependencyService';
 
 interface InternalChildComponent {
@@ -10,7 +17,7 @@ interface InternalChildComponent {
     start: number;
     end: number;
   };
-  defaultExportExpr?: ts.Node;
+  defaultExportNode?: ts.Node;
 }
 
 export function getChildComponents(
@@ -19,7 +26,17 @@ export function getChildComponents(
   checker: ts.TypeChecker,
   tagCasing = 'kebab'
 ): InternalChildComponent[] | undefined {
-  const componentsSymbol = checker.getPropertyOfType(defaultExportType, 'components');
+  let type = defaultExportType;
+  if (isClassType(tsModule, type)) {
+    // get decorator argument type when class
+    const classDecoratorArgumentType = getComponentDecoratorArgumentType(tsModule, defaultExportType, checker);
+    if (!classDecoratorArgumentType) {
+      return undefined;
+    }
+    type = classDecoratorArgumentType;
+  }
+
+  const componentsSymbol = checker.getPropertyOfType(type, 'components');
   if (!componentsSymbol || !componentsSymbol.valueDeclaration) {
     return undefined;
   }
@@ -56,25 +73,34 @@ export function getChildComponents(
       }
 
       if (objectLiteralSymbol.flags & tsModule.SymbolFlags.Alias) {
-        const definitionObjectLiteralSymbol = checker.getAliasedSymbol(objectLiteralSymbol);
-        if (definitionObjectLiteralSymbol.valueDeclaration) {
-          const defaultExportExpr = getDefaultExportObjectLiteralExpr(
-            tsModule,
-            definitionObjectLiteralSymbol.valueDeclaration.getSourceFile()
-          );
+        const definitionSymbol = checker.getAliasedSymbol(objectLiteralSymbol);
+        if (tsModule.isClassDeclaration(definitionSymbol.valueDeclaration)) {
+          const defaultExportNode = definitionSymbol.valueDeclaration;
+          result.push({
+            name: componentName,
+            documentation: buildDocumentation(tsModule, definitionSymbol, checker),
+            definition: {
+              path: definitionSymbol.valueDeclaration.getSourceFile().fileName,
+              start: defaultExportNode.getStart(undefined, true),
+              end: defaultExportNode.getEnd()
+            },
+            defaultExportNode: getNodeFromExportNode(tsModule, defaultExportNode)
+          });
+        } else if (definitionSymbol.valueDeclaration) {
+          const defaultExportExpr = getDefaultExportNode(tsModule, definitionSymbol.valueDeclaration.getSourceFile());
           if (!defaultExportExpr) {
             return;
           }
 
           result.push({
             name: componentName,
-            documentation: buildDocumentation(tsModule, definitionObjectLiteralSymbol, checker),
+            documentation: buildDocumentation(tsModule, definitionSymbol, checker),
             definition: {
-              path: definitionObjectLiteralSymbol.valueDeclaration.getSourceFile().fileName,
+              path: definitionSymbol.valueDeclaration.getSourceFile().fileName,
               start: defaultExportExpr.getStart(undefined, true),
               end: defaultExportExpr.getEnd()
             },
-            defaultExportExpr
+            defaultExportNode: getNodeFromExportNode(tsModule, defaultExportExpr)
           });
         }
       }
