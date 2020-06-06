@@ -20,6 +20,26 @@ Will be maintained until Vetur is reactivated.
 
 ## CHANGELOG
 
+### 0.1.0
+- base on Vetur@0.24.0
+- Speed up and stabilize e2e test
+- Fix no props completion when child component `export default {}` is end of `;` 
+- Fix object property completion when have hyphen 
+- Fix SFC without a script tag show an error 
+- Add more typescript language service features and fix more bugs
+  - Add suggestion diagnostics and can fix unused import.
+  - Add Organize Imports code actions.
+  - Diagnostics will show quick fix in VScode.
+  - Add Typescript Refactor support
+  - Add support resolveJsonModule
+- Add support analyzing vue-class-component and vue-property-decorator 
+  - Can't support self vue component props completion when `@Component({ props: {  } })`
+- Upgrade required vscode version to 1.43.0
+- Upgrade prettier to 2.0.5
+- Upgrade typescript from 3.7.5 to 3.9.5
+- Fix template interpolation hover info of v-for readonly array item.
+- 🙌 Improve performance while using template interpolation service. Thanks to contribution from @IWANABETHATGUY. [#1839](https://github.com/vuejs/vetur/pull/1839).
+
 ## Original README
 
 Vue tooling for VS Code.

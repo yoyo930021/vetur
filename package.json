@@ -4,7 +4,7 @@
   "description": "Vue tooling for VS Code from Vetur",
   "author": "Pine Wu <octref@gmail.com>",
   "icon": "asset/vue.png",
-  "version": "0.24.0",
+  "version": "0.1.0",
   "publisher": "yoyo930021",
   "scripts": {
     "build:grammar": "tsc -p . && node dist/scripts/build_grammar",
