@@ -20,6 +20,9 @@ Will be maintained until Vetur is reactivated.
 
 ## CHANGELOG
 
+### 0.1.1
+- change vscode marketplace information
+
 ### 0.1.0
 - base on Vetur@0.24.0
 - Speed up and stabilize e2e test
