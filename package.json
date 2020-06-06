@@ -1,11 +1,11 @@
 {
-  "name": "vetur",
-  "displayName": "Vetur",
-  "description": "Vue tooling for VS Code",
+  "name": "vuter",
+  "displayName": "Vuter",
+  "description": "Vue tooling for VS Code from Vetur",
   "author": "Pine Wu <octref@gmail.com>",
   "icon": "asset/vue.png",
   "version": "0.24.0",
-  "publisher": "octref",
+  "publisher": "yoyo930021",
   "scripts": {
     "build:grammar": "tsc -p . && node dist/scripts/build_grammar",
     "compile": "run-s compile:source copy:snippets",
